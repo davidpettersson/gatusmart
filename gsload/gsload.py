@@ -1,30 +1,17 @@
 from pprint import pprint
+from random import sample
 import xml.sax
 from re import compile
 from math import sqrt
 import pymongo
 import sys
+from gsnodes import NodeRepository
+from datetime import datetime
 
-RE_HOUSE_NUMBER = compile('(\d+)-(\d+)') # TODO: If possible, add ^ and/or $. Qualify with re.ASCII
+RE_HOUSE_NUMBER = compile('(\d+)-(\d+)')  # TODO: If possible, add ^ and/or $. Qualify with re.ASCII
 
 ALLOWED_PLACES = ['city', 'town', 'village']
 ALLOWED_HIGHWAYS = ['secondary', 'tertiary', 'unclassified', 'residential', 'service']
-
-
-class NodeHandler(xml.sax.ContentHandler):
-    def __init__(self, wanted_nodes):
-        xml.sax.ContentHandler.__init__(self)
-        self._nodes = {}
-        self._wanted_nodes = wanted_nodes
-
-    def startElement(self, name, attrs):
-        if name == 'node':
-            n_id = attrs['id']
-            if n_id in self._wanted_nodes:
-                n_lat = float(attrs['lat'])
-                n_lng = float(attrs['lon'])
-                n = (n_id, n_lat, n_lng)
-                self._nodes[n_id] = n
 
 
 class PlaceStreetHandler(xml.sax.ContentHandler):
@@ -75,12 +62,12 @@ class PlaceStreetHandler(xml.sax.ContentHandler):
                     self._name = attrs['v']
         elif name == 'nd':
             if self._way:
-                self._nodes.append(attrs['ref'])
+                self._nodes.append(int(attrs['ref']))
         elif name == 'node':
             self._node = True
             self._reset_addr()
-            self._node_id = attrs['id']
-            self._nodes.append(attrs['id'])
+            self._node_id = int(attrs['id'])
+            self._nodes.append(int(attrs['id']))
             self._place_collect = False
 
     def _try_save_addr(self):
@@ -148,13 +135,41 @@ class PlaceStreetHandler(xml.sax.ContentHandler):
         else:
             self._places[place] = set(nodes)
 
+HISTOGRAM = { }
 
-def resolve_positions(wanted_nodes, nodes):
+def resolve_positions(wanted_nodes, node_repo):
     positions = []
+
+    # should we reduce the number of nodes?
+    if len(wanted_nodes) > 2:
+        percentage = 50
+        if len(wanted_nodes) > 10:
+            percentage = 10
+        elif len(wanted_nodes) > 100:
+            percentage = 5
+        elif len(wanted_nodes) > 1000:
+            percentage = 1
+
+        k = int((percentage / 100) * len(wanted_nodes))
+        new_wanted_nodes = sample(wanted_nodes, k)
+
+        # just in case
+        if len(new_wanted_nodes) == 0:
+            new_wanted_nodes = [ wanted_nodes[0] ]
+
+        if not percentage in HISTOGRAM.keys():
+            HISTOGRAM[percentage] = 0
+        HISTOGRAM[percentage] += 1
+
+        wanted_nodes = new_wanted_nodes
+
     for wanted_node in wanted_nodes:
-        n_id, n_lat, n_lng = nodes[wanted_node]
-        positions.append((n_lat, n_lng))
+        n = node_repo.find_by_id(wanted_node)
+        if n:
+            positions.append(n['location'])
+
     return positions
+
 
 def distance(p, q):
     if p == q:
@@ -163,7 +178,11 @@ def distance(p, q):
         return sqrt((q[0] - p[0]) ** 2 + ((q[1] - p[1]) ** 2))
 
 
-def pick_position(positions):
+def pick_position_cheap(positions):
+    return positions[0]
+
+
+def pick_position_expensive(positions):
     lats = 0
     lngs = 0
 
@@ -173,6 +192,7 @@ def pick_position(positions):
         lngs += lng
 
     center = (lats / len(positions), lngs / len(positions))
+
     # find the closest one
     best = positions[0]
     best_dist = distance(center, best)
@@ -186,12 +206,22 @@ def pick_position(positions):
     return best
 
 
+def pick_position(positions):
+    if not positions:
+        return None
+    if len(positions) == 0:
+        return None
+    return pick_position_expensive(positions)
+
+
+
 def pick_nearest_place(position, places, street=''):
     best_place = places[0]
     best_d = distance(position, places[0][1])
 
     if street.startswith('Kullagatan'):
         print('begin ' + str(position))
+        print('  best place is now ' + best_place[0])
 
     for place in places[1:]:
         place_name, place_position = place
@@ -207,48 +237,51 @@ def pick_nearest_place(position, places, street=''):
     return best_place
 
 
-def find_places_streets(path):
+def find_places_streets(path, node_repo):
     print('  Parsing streets and timbuks...')
+    mark = datetime.now()
     ps_handler = PlaceStreetHandler()
     parser = xml.sax.make_parser()
     parser.setContentHandler(ps_handler)
     parser.parse(open(path, "r", encoding='utf-8'))
-
-    wanted_nodes = set()
-
-    for place_nodes in ps_handler._places.values():
-        wanted_nodes.update(place_nodes)
-
-    for street_nodes in ps_handler._streets.values():
-        wanted_nodes.update(street_nodes)
-
-    for timbuk_nodes in ps_handler._timbuks.values():
-        wanted_nodes.update(timbuk_nodes)
-
-    print('  Parsing nodes...')
-    n_handler = NodeHandler(wanted_nodes)
-    parser = xml.sax.make_parser()
-    parser.setContentHandler(n_handler)
-    parser.parse(open(path, "r", encoding='utf-8'))
+    print('   -> done in %f seconds' % (datetime.now() - mark).total_seconds())
 
     print('  Preparing %d places' % len(ps_handler._places.items()))
+    mark = datetime.now()
     places = []
     for place, place_nodes in ps_handler._places.items():
-        places.append((place, pick_position(resolve_positions(place_nodes, n_handler._nodes))))
+        position = pick_position(resolve_positions(place_nodes, node_repo))
+        if not position:
+            pprint('No position for place ' + str(place))
+            continue
+        places.append((place, position))
+    print('   -> done in %f seconds' % (datetime.now() - mark).total_seconds())
 
     print('  Preparing %d streets' % len(ps_handler._streets.items()))
+    mark = datetime.now()
     streets = []
     for street, street_nodes in ps_handler._streets.items():
         place, street, no = street
-        streets.append((place, street, no, pick_position(resolve_positions(street_nodes, n_handler._nodes))))
+        position = pick_position(resolve_positions(street_nodes, node_repo))
+        if not position:
+            pprint('No position for street ' + str(street) + ' in ' + place)
+            continue
+        streets.append((place, street, no, position))
+    print('   -> done in %f seconds' % (datetime.now() - mark).total_seconds())
 
     print('  Preparing %d timbuks' % len(ps_handler._timbuks.items()))
+    mark = datetime.now()
     for timbuk, timbuk_nodes in ps_handler._timbuks.items():
         street, no, seq = timbuk
-        position = pick_position(resolve_positions(timbuk_nodes, n_handler._nodes))
+        position = pick_position(resolve_positions(timbuk_nodes, node_repo))
+        if position is None:
+            pprint('No position for timbuk ' + str(street))
+            continue
         place = pick_nearest_place(position, places, street)
         streets.append((place[0], street, no, position))
+    print('   -> done in %f seconds' % (datetime.now() - mark).total_seconds())
 
+    pprint(HISTOGRAM)
     return places, streets
 
 
@@ -257,8 +290,17 @@ def make_searchable(name):
 
 
 def osmload(path):
+    node_repo = NodeRepository()
+    perform_node_refresh = False
+
+    if perform_node_refresh:
+        print('Refreshing nodes...')
+        node_count = node_repo.refresh(path)
+        print('Found %d nodes' % (node_count,))
+        input('Press enter to continue...')
+
     print('Finding places and streets...')
-    places, streets = find_places_streets(path)
+    places, streets = find_places_streets(path, node_repo)
     print('Found %d places and %d streets' % (len(places), len(streets)))
 
     input('Press enter to save...')
@@ -303,7 +345,7 @@ def osmload(path):
                 'house_number': street[2],
                 'location': street[3],
             }
-        #pprint(s['searchable_name'])
+        # pprint(s['searchable_name'])
         db.streets.insert(s)
         if k % 1000 == 0 and k > 0:
             print('  ...%6d' % k)
