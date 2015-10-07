@@ -91,7 +91,7 @@ def prepare_q(q):
 
 
 def prepare_p(p):
-    p = p[1:-1]
+    p = p[0:-1]
     a, b = p.split(',')
     p = (float(a), float(b))
     return p
@@ -107,8 +107,10 @@ def auto_complete():
     q = prepare_q(request.values['q'])
     if request.values.has_key('p'):
         p = prepare_p(request.values['p'])
+        print 'using given position', p
     else:
         p = [ 55.7091, 13.2010 ]
+        print 'using default position', p
 
     results = []
 
