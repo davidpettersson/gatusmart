@@ -1,0 +1,37 @@
+
+body {
+    font-family: "aktiv-grotesk",sans-serif;
+    font-weight: 200;
+    font-size: 14pt;
+    color: #3e4349;
+}
+
+h1, h2, h3 {
+    color: black;
+    font-family: "quatro-slab";
+}
+
+h1 {
+    font-size: 96pt;
+}
+
+hr {
+    border-top: solid 1px lightgray;
+}
+
+.lead {
+    font-weight: 700;
+}
+
+.container-limit {
+    max-width: 700px;
+    margin: 1em auto;
+}
+
+.container-centered {
+    text-align: center;
+}
+
+img.fill-image-width {
+    width: 100%;
+}

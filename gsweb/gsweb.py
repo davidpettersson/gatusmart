@@ -1,11 +1,12 @@
+# -*- encoding: utf-8 -*-
 #
 # gsweb.py - en del av Gatusmart, http://gatusmart.se
-# Tillg‰ngliggjord under Apache Software License 2.0, se LICENSE.txt
+# Tillg√§ngliggjord under Apache Software License 2.0, se LICENSE.txt
 #
 
-from flask import Flask, g, request
+from flask import Flask, g, request, render_template
 from flask.ext.cors import CORS
-from flask.json import dumps
+from flask.json import dumps, jsonify
 from pymongo import MongoClient
 from datetime import datetime
 
@@ -27,7 +28,7 @@ def get_db():
 
 @app.route('/')
 def index():
-    return 'Viendi Geoservices - contact hej (a) viendi.se'
+    return render_template('index.html')
 
 
 def has_no(qs):
@@ -55,9 +56,9 @@ def find_places(q, p):
 def find_streets(q, p):
     db = get_db()
     if has_no(q):
-        ps = db.streets.find({'searchable_name': {'$regex': '^' + q }, 'location': { '$near': p }})
+        ps = db.streets.find({'searchable_name': {'$regex': '^' + q }, 'location': { '$near': { 'type': 'Point', 'coordinates': p }}}).limit(100)
     else:
-        ps = db.streets.find({'searchable_name': {'$regex': '^' + q }, 'house_number': '', 'location': { '$near': p }})
+        ps = db.streets.find({'searchable_name': {'$regex': '^' + q }, 'house_number': '', 'location': { '$near': { 'type': 'Point', 'coordinates': p }} }).limit(100)
     rs = []
     dupes = set()
     for p in ps:
@@ -101,7 +102,7 @@ def ping():
     return 'pong'
 
 
-@app.route('/streetsmart/auto_complete')
+@app.route('/api/auto_complete')
 def auto_complete():
     q = prepare_q(request.values['q'])
     if request.values.has_key('p'):
@@ -123,14 +124,14 @@ def auto_complete():
     msg = msg.encode('utf-8')
     with open('q.log', 'a') as f:
         f.write(msg)
-    return dumps(results)
+    return jsonify(results=results)
 
 
 @app.teardown_appcontext
 def close_connection(exception):
     db_client = getattr(g, '_db_client', None)
     if db_client is not None:
-        db_client.disconnect()
+        db_client.close()
 
 
 if __name__ == '__main__':
