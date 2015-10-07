@@ -1,7 +1,7 @@
 #
-# gsnodes.py
+# gsnodes.py - en del av Gatusmart, http://gatusmart.se
+# Tillgängliggjord under Apache Software License 2.0, se LICENSE.txt
 #
-from pprint import pprint
 
 import xml.sax
 import pymongo

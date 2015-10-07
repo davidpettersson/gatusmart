@@ -1,3 +1,8 @@
+#
+# gsweb.py - en del av Gatusmart, http://gatusmart.se
+# Tillgängliggjord under Apache Software License 2.0, se LICENSE.txt
+#
+
 from flask import Flask, g, request
 from flask.ext.cors import CORS
 from flask.json import dumps
